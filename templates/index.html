@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>作业提交系统</title>
+    <!-- 优先尝试加载本地 Tailwind，如果失败请使用 CDN -->
+    <script src="/static/tailwindcss.js"></script>
+    <!-- <script src="https://cdn.tailwindcss.com"></script> -->
+    <style>
+        .fade-in {
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 min-h-screen text-gray-800 font-sans">
+
+    <!-- 顶部导航 -->
+    <nav class="bg-blue-600 text-white p-4 shadow-lg hidden" id="navbar">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold">📚 作业管理系统</h1>
+            <div>
+                <span id="nav-user" class="mr-4"></span>
+                <button onclick="logout()"
+                    class="bg-blue-700 px-3 py-1 rounded hover:bg-blue-800 transition">退出</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主容器 -->
+    <div class="container mx-auto p-4">
+
+        <!-- 登录页 -->
+        <div id="login-view" class="max-w-md mx-auto bg-white p-8 rounded-lg shadow-md mt-20 fade-in">
+            <h2 class="text-2xl font-bold mb-6 text-center text-blue-600">用户登录</h2>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">用户名</label>
+                    <input type="text" id="username"
+                        class="mt-1 block w-full border border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="student1 或 teacher1">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">密码</label>
+                    <input type="password" id="password" class="mt-1 block w-full border border-gray-300 rounded-md p-2"
+                        value="123456">
+                </div>
+                <button onclick="login()"
+                    class="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 transition">登 录</button>
+            </div>
+            <p class="mt-4 text-xs text-gray-500 text-center">测试账号: teacher1 / 123456 或 student1 / 123456</p>
+        </div>
+
+        <!-- 老师面板 -->
+        <div id="teacher-view" class="hidden fade-in">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold">我发布的作业</h2>
+                <button onclick="toggleModal('create-modal')"
+                    class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">+ 发布新作业</button>
+            </div>
+            <div id="teacher-list" class="grid gap-4 md:grid-cols-2 lg:grid-cols-3"></div>
+        </div>
+
+        <!-- 学生面板 -->
+        <div id="student-view" class="hidden fade-in">
+            <h2 class="text-2xl font-bold mb-6">我的作业列表</h2>
+            <div id="student-list" class="space-y-4"></div>
+        </div>
+
+    </div>
+
+    <!-- 模态框：发布作业 -->
+    <div id="create-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center">
+        <div class="bg-white p-6 rounded-lg w-full max-w-lg">
+            <h3 class="text-lg font-bold mb-4">发布新作业</h3>
+            <input id="new-title" class="w-full border p-2 mb-2 rounded" placeholder="标题">
+            <textarea id="new-desc" class="w-full border p-2 mb-2 rounded" placeholder="描述"></textarea>
+            <input id="new-date" type="date" class="w-full border p-2 mb-4 rounded">
+            <div class="flex justify-end space-x-2">
+                <button onclick="toggleModal('create-modal')" class="px-4 py-2 text-gray-600">取消</button>
+                <button onclick="createAssignment()" class="px-4 py-2 bg-blue-600 text-white rounded">发布</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框：查看/评分 -->
+    <div id="grade-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center">
+        <div class="bg-white p-6 rounded-lg w-full max-w-3xl h-3/4 flex flex-col">
+            <div class="flex justify-between mb-4">
+                <h3 class="text-lg font-bold">提交详情</h3>
+                <button onclick="toggleModal('grade-modal')" class="text-red-500">关闭</button>
+            </div>
+            <div id="subs-list" class="flex-1 overflow-auto space-y-2"></div>
+        </div>
+    </div>
+
+    <script>
+        // --- 核心逻辑 ---
+        let currentRole = '';
+
+        async function api(url, method = 'GET', body = null) {
+            const options = { method, headers: { 'Content-Type': 'application/json' } };
+            if (body) options.body = JSON.stringify(body);
+            const res = await fetch(url, options);
+            if (res.status === 401) window.location.reload();
+            return res.json();
+        }
+
+        async function init() {
+            const auth = await api('/api/check_auth');
+            if (auth.is_logged_in) {
+                currentRole = auth.role;
+                showDashboard(auth.username, auth.role);
+            } else {
+                document.getElementById('login-view').classList.remove('hidden');
+            }
+        }
+
+        async function login() {
+            const u = document.getElementById('username').value;
+            const p = document.getElementById('password').value;
+            const res = await api('/api/login', 'POST', { username: u, password: p });
+            if (res.status === 'success') {
+                currentRole = res.role;
+                document.getElementById('login-view').classList.add('hidden');
+                showDashboard(res.username, res.role);
+            } else {
+                alert(res.message);
+            }
+        }
+
+        async function logout() {
+            await api('/api/logout', 'POST');
+            window.location.reload();
+        }
+
+        function showDashboard(username, role) {
+            document.getElementById('navbar').classList.remove('hidden');
+            document.getElementById('nav-user').textContent = `${username} (${role === 'student' ? '学生' : '教师'})`;
+
+            if (role === 'teacher') {
+                document.getElementById('teacher-view').classList.remove('hidden');
+                loadTeacherData();
+            } else {
+                document.getElementById('student-view').classList.remove('hidden');
+                loadStudentData();
+            }
+        }
+
+        // --- 老师功能 ---
+        async function loadTeacherData() {
+            const list = await api('/api/assignments');
+            const container = document.getElementById('teacher-list');
+            container.innerHTML = list.map(a => `
+                <div class="bg-white p-4 rounded shadow border-l-4 border-blue-500">
+                    <h3 class="font-bold text-lg">${a.title}</h3>
+                    <p class="text-gray-600 text-sm mb-2">截止: ${a.due_date || '无'}</p>
+                    <p class="text-gray-500 text-sm truncate">${a.description}</p>
+                    <button onclick="viewSubmissions(${a.id})" class="mt-3 text-blue-600 hover:underline text-sm">查看提交 &rarr;</button>
+                </div>
+            `).join('');
+        }
+
+        async function createAssignment() {
+            const title = document.getElementById('new-title').value;
+            const desc = document.getElementById('new-desc').value;
+            const date = document.getElementById('new-date').value;
+            if (!title) return alert('标题必填');
+            await api('/api/assignments', 'POST', { title, desc, date });
+            toggleModal('create-modal');
+            loadTeacherData();
+        }
+
+        async function viewSubmissions(aid) {
+            const subs = await api(`/api/teacher/subs/${aid}`);
+            const container = document.getElementById('subs-list');
+            toggleModal('grade-modal');
+            if (subs.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-center">暂无学生提交</p>';
+                return;
+            }
+            container.innerHTML = subs.map(s => `
+                <div class="border p-3 rounded bg-gray-50">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="font-bold">${s.username}</span>
+                        <span class="text-xs text-gray-500">${s.submitted_at}</span>
+                    </div>
+                    <div class="bg-white p-2 border rounded text-sm mb-2 whitespace-pre-wrap">${s.content}</div>
+                    <div class="flex items-center space-x-2">
+                        <input type="number" id="score-${s.id}" value="${s.score || ''}" class="border w-20 p-1 rounded" placeholder="分数">
+                        <button onclick="grade(${s.id}, ${s.assignment_id})" class="bg-blue-500 text-white px-2 py-1 rounded text-sm">打分</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function grade(sid, aid) {
+            const score = document.getElementById(`score-${sid}`).value;
+            if (score < 0 || score > 100) return alert('分数无效');
+            await api('/api/grade', 'POST', { sid, aid, score });
+            alert('评分成功');
+        }
+
+        // --- 学生功能 ---
+        async function loadStudentData() {
+            const list = await api('/api/assignments');
+            const container = document.getElementById('student-list');
+            container.innerHTML = list.map(a => `
+                <div class="bg-white p-6 rounded shadow flex flex-col md:flex-row justify-between">
+                    <div class="mb-4 md:mb-0">
+                        <div class="flex items-center space-x-2">
+                            <h3 class="font-bold text-lg">${a.title}</h3>
+                            ${a.score !== null ? `<span class="bg-green-100 text-green-800 text-xs px-2 py-1 rounded">得分: ${a.score}</span>` : ''}
+                        </div>
+                        <p class="text-sm text-gray-500">老师: ${a.teacher_name} | 截止: ${a.due_date || '无'}</p>
+                        <p class="mt-2 text-gray-700">${a.description}</p>
+                    </div>
+                    <div class="w-full md:w-1/3">
+                        <textarea id="content-${a.id}" class="w-full border p-2 rounded h-24 text-sm" placeholder="在此输入作业内容...">${a.my_submission || ''}</textarea>
+                        <button onclick="submitHomework(${a.id})" class="mt-2 w-full bg-blue-600 text-white py-1 rounded hover:bg-blue-700 transition">
+                            ${a.my_submission ? '更新提交' : '提交作业'}
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function submitHomework(aid) {
+            const content = document.getElementById(`content-${aid}`).value;
+            if (!content) return alert('内容不能为空');
+            await api('/api/submissions', 'POST', { aid, content });
+            alert('提交成功！');
+            loadStudentData();
+        }
+
+        function toggleModal(id) {
+            document.getElementById(id).classList.toggle('hidden');
+        }
+
+        init();
+    </script>
+</body>
+
+</html>
